@@ -16,6 +16,14 @@ public class TestLobby : MonoBehaviour
     
     private Lobby currentLobby;
     private float heartbeatTimer;
+    private float lobbyUpdateTimer;
+    private float heartbeatTimerMax = 10f;
+    private float lobbyUpdateTimerMax = 1.1f;
+    private bool IsInGame;
+
+    private const string KeyStartGame = "StartGameCode";
+
+    [SerializeField] private TestRelay testRelay;
     
     
     private async void Start()
@@ -33,18 +41,41 @@ public class TestLobby : MonoBehaviour
     private void Update()
     {
         HandleLobbyHeartbeat();
+        HandleLobbyPollForUpdates();
     }
 
     private async void HandleLobbyHeartbeat()
     {
         if (currentLobby is null) return;
-        
-        float heartbeatTimerMax = 10f;
-        heartbeatTimer -= Time.deltaTime;
+        if (!IsLobbyHost()) return;
+
+            heartbeatTimer -= Time.deltaTime;
         if (heartbeatTimer < 0)
         {
             heartbeatTimer = heartbeatTimerMax;
             await LobbyService.Instance.SendHeartbeatPingAsync(currentLobby.Id);
+        }
+    }
+    
+    private async void HandleLobbyPollForUpdates()
+    {
+        if (IsInGame) return;
+        if (currentLobby is null) return;
+        
+        lobbyUpdateTimer -= Time.deltaTime;
+        if (lobbyUpdateTimer < 0)
+        {
+            lobbyUpdateTimer = lobbyUpdateTimerMax;
+            currentLobby = await LobbyService.Instance.GetLobbyAsync(currentLobby.Id);
+        }
+
+        if (currentLobby.Data[KeyStartGame].Value != "0")
+        {
+            if (!IsLobbyHost())
+            {
+                testRelay.JoinRelayFromLobby(currentLobby.Data[KeyStartGame].Value);
+                IsInGame = true;
+            }
         }
     }
 
@@ -52,9 +83,17 @@ public class TestLobby : MonoBehaviour
     {
         try
         {
+            CreateLobbyOptions options = new CreateLobbyOptions()
+            {
+                Data = new Dictionary<string, DataObject>()
+                {
+                    { KeyStartGame, new DataObject(DataObject.VisibilityOptions.Member,"0") }
+                }
+            };
+            
             string lobbyName = text.text;
             int maxPlayers = Random.Range(2,6);
-            Lobby lobby = await LobbyService.Instance.CreateLobbyAsync(lobbyName,maxPlayers);
+            Lobby lobby = await LobbyService.Instance.CreateLobbyAsync(lobbyName,maxPlayers,options);
 
             currentLobby = lobby;
         
@@ -91,9 +130,10 @@ public class TestLobby : MonoBehaviour
                 return;
             }
 
-            Lobby lobby = await LobbyService.Instance.JoinLobbyByIdAsync(queryResponse.Results[0].Id);
-            Debug.Log("Joined to the lobby! " + lobby.Name + " " + lobby.MaxPlayers);
-            Log("Joined to the lobby! " + lobby.Name + " " + lobby.MaxPlayers);
+            currentLobby = await LobbyService.Instance.JoinLobbyByIdAsync(queryResponse.Results[0].Id);
+            Debug.Log("Joined to the lobby! " + currentLobby.Name + " " + currentLobby.MaxPlayers);
+            Log("Joined to the lobby! " + currentLobby.Name + " " + currentLobby.MaxPlayers);
+            
         }
         catch (LobbyServiceException e)
         {
@@ -101,19 +141,21 @@ public class TestLobby : MonoBehaviour
             Log(e.Message);
         }
     }
-    
-    // public async void LeaveLobby()
-    // {
-    //     try
-    //     {
-    //         await LobbyService.Instance.RemovePlayerAsync(currentLobby.Id, AuthenticationService.Instance.PlayerId);
-    //     }
-    //     catch (LobbyServiceException e)
-    //     {
-    //         Debug.Log(e);
-    //     }
-    // }
-    
+
+    public async void StartGame()
+    {
+        if(!IsLobbyHost()) return;
+        
+        string joinCode = await testRelay.CreateRelayFromLobby();
+        currentLobby = await Lobbies.Instance.UpdateLobbyAsync(currentLobby.Id, new UpdateLobbyOptions()
+        {
+            Data = new Dictionary<string, DataObject>()
+            {
+                { KeyStartGame, new DataObject(DataObject.VisibilityOptions.Member, joinCode) }
+            }
+        });
+    }
+
     public async void ListLobbies()
     {
         try
@@ -138,6 +180,13 @@ public class TestLobby : MonoBehaviour
             Debug.Log(e);
             Log(e.Message);
         }
+    }
+
+    private bool IsLobbyHost()
+    {
+        if (currentLobby is null) return false;
+
+        return currentLobby.HostId == AuthenticationService.Instance.PlayerId;
     }
 
     private void Log(string message)
