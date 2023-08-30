@@ -1,6 +1,8 @@
 using System.Collections;
 using System.Collections.Generic;
 using TMPro;
+using Unity.Netcode;
+using Unity.Netcode.Transports.UTP;
 using Unity.Services.Authentication;
 using Unity.Services.Core;
 using Unity.Services.Lobbies;
@@ -37,6 +39,15 @@ public class TestRelay : MonoBehaviour
 
             Debug.Log("Created relay! Join code is " + relayJoinCode);
             Log("Created relay! Join code is " + relayJoinCode);
+            
+            NetworkManager.Singleton.GetComponent<UnityTransport>().SetHostRelayData(
+                allocation.RelayServer.IpV4,
+                (ushort)allocation.RelayServer.Port,
+                allocation.AllocationIdBytes,
+                allocation.Key,
+                allocation.ConnectionData);
+
+            NetworkManager.Singleton.StartHost();
         }
         catch (RelayServiceException e)
         {
@@ -52,10 +63,21 @@ public class TestRelay : MonoBehaviour
         try
         {
             string joinCode = text.text;
-            await RelayService.Instance.JoinAllocationAsync(joinCode);
+            joinCode = joinCode.Substring(0, 6);
+            JoinAllocation joinAllocation = await RelayService.Instance.JoinAllocationAsync(joinCode);
 
             Debug.Log("Joined to the relay with " + joinCode);
             Log("Joined to the relay with " + joinCode);
+            
+            NetworkManager.Singleton.GetComponent<UnityTransport>().SetClientRelayData(
+                joinAllocation.RelayServer.IpV4,
+                (ushort)joinAllocation.RelayServer.Port,
+                joinAllocation.AllocationIdBytes,
+                joinAllocation.Key,
+                joinAllocation.ConnectionData,
+                joinAllocation.HostConnectionData);
+
+            NetworkManager.Singleton.StartClient();
         }
         catch (LobbyServiceException e)
         {
