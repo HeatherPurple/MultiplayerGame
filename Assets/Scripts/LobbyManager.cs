@@ -1,19 +1,13 @@
-using System;
-using System.Collections;
 using System.Collections.Generic;
-using TMPro;
 using Unity.Services.Authentication;
 using Unity.Services.Core;
 using Unity.Services.Lobbies;
 using Unity.Services.Lobbies.Models;
 using UnityEngine;
-using UnityEngine.Serialization;
 using Random = UnityEngine.Random;
 
-public class TestLobby : MonoBehaviour
+public class LobbyManager : MonoBehaviour
 {
-    [SerializeField] private TextMeshProUGUI logUGUI;
-    
     private Lobby currentLobby;
     private float heartbeatTimer;
     private float lobbyUpdateTimer;
@@ -23,17 +17,15 @@ public class TestLobby : MonoBehaviour
 
     private const string KeyStartGame = "StartGameCode";
 
-    [SerializeField] private TestRelay testRelay;
-    
-    
-    private async void Start()
+    public static LobbyManager Singleton { get; private set; }
+
+    private async void Start() //not here
     {
         await UnityServices.InitializeAsync();
-
+    
         AuthenticationService.Instance.SignedIn += () =>
         {
             Debug.Log("Signed in with ID:" + AuthenticationService.Instance.PlayerId);
-            Log("Signed in with ID:" + AuthenticationService.Instance.PlayerId);
         };
         await AuthenticationService.Instance.SignInAnonymouslyAsync();
     }
@@ -42,6 +34,14 @@ public class TestLobby : MonoBehaviour
     {
         HandleLobbyHeartbeat();
         HandleLobbyPollForUpdates();
+    }
+
+    private void OnEnable()
+    {
+        if (Singleton == null)
+        {
+            Singleton = this;
+        }
     }
 
     private async void HandleLobbyHeartbeat()
@@ -73,13 +73,13 @@ public class TestLobby : MonoBehaviour
         {
             if (!IsLobbyHost())
             {
-                testRelay.JoinRelayFromLobby(currentLobby.Data[KeyStartGame].Value);
+                RelayManager.Singleton.JoinRelay(currentLobby.Data[KeyStartGame].Value);
                 IsInGame = true;
             }
         }
     }
 
-    public async void CreateLobby(TextMeshProUGUI text)
+    public async void CreateLobby(string lobbyName)
     {
         try
         {
@@ -91,25 +91,20 @@ public class TestLobby : MonoBehaviour
                 }
             };
             
-            string lobbyName = text.text;
-            int maxPlayers = Random.Range(2,6);
-            Lobby lobby = await LobbyService.Instance.CreateLobbyAsync(lobbyName,maxPlayers,options);
+            int maxPlayers = Random.Range(2,6); ////
+            currentLobby = await LobbyService.Instance.CreateLobbyAsync(lobbyName,maxPlayers,options);
 
-            currentLobby = lobby;
-        
-            Debug.Log("Created lobby! " + lobby.Name + " " + lobby.MaxPlayers);
-            Log("Created lobby! " + lobby.Name + " " + lobby.MaxPlayers);
+            Debug.Log("Created lobby! " + currentLobby.Name + " " + currentLobby.MaxPlayers); 
         }
         catch (LobbyServiceException e)
         {
-            Debug.Log(e);
-            Log(e.Message);
+            Debug.Log(e); 
         }
         
         
     }
     
-    public async void JoinLobbyByName(TextMeshProUGUI text)
+    public async void JoinLobbyByName(string lobbyName)
     {
         try
         {
@@ -118,7 +113,7 @@ public class TestLobby : MonoBehaviour
                 Count = 1,
                 Filters = new List<QueryFilter>
                 {
-                    new QueryFilter(QueryFilter.FieldOptions.Name, text.text, QueryFilter.OpOptions.EQ),
+                    new QueryFilter(QueryFilter.FieldOptions.Name, lobbyName, QueryFilter.OpOptions.EQ),
                 }
             };
             QueryResponse queryResponse = await Lobbies.Instance.QueryLobbiesAsync(queryLobbiesOptions);
@@ -126,19 +121,16 @@ public class TestLobby : MonoBehaviour
             if (queryResponse.Results.Count == 0)
             {
                 Debug.Log("There's no lobby with that name!");
-                Log("There's no lobby with that name!");
                 return;
             }
 
             currentLobby = await LobbyService.Instance.JoinLobbyByIdAsync(queryResponse.Results[0].Id);
             Debug.Log("Joined to the lobby! " + currentLobby.Name + " " + currentLobby.MaxPlayers);
-            Log("Joined to the lobby! " + currentLobby.Name + " " + currentLobby.MaxPlayers);
-            
+
         }
         catch (LobbyServiceException e)
         {
             Debug.Log(e);
-            Log(e.Message);
         }
     }
 
@@ -146,7 +138,7 @@ public class TestLobby : MonoBehaviour
     {
         if(!IsLobbyHost()) return;
         
-        string joinCode = await testRelay.CreateRelayFromLobby();
+        string joinCode = await RelayManager.Singleton.CreateRelay();
         currentLobby = await Lobbies.Instance.UpdateLobbyAsync(currentLobby.Id, new UpdateLobbyOptions()
         {
             Data = new Dictionary<string, DataObject>()
@@ -156,7 +148,7 @@ public class TestLobby : MonoBehaviour
         });
     }
 
-    public async void ListLobbies()
+    public async void ListLobbies() //???
     {
         try
         {
@@ -166,19 +158,16 @@ public class TestLobby : MonoBehaviour
             foreach (var lobby in queryResponse.Results)
             {
                 Debug.Log(counter +". " + lobby.Name + " " + lobby.Players.Count + "/" + lobby.MaxPlayers);
-                Log(counter +". " + lobby.Name + " " + lobby.Players.Count + "/" + lobby.MaxPlayers);
                 counter++;
             }
             if (counter == 1)
             {
-               Debug.Log("No lobbies found!"); 
-               Log("No lobbies found!"); 
+               Debug.Log("No lobbies found!");
             }
         }
         catch (LobbyServiceException e)
         {
             Debug.Log(e);
-            Log(e.Message);
         }
     }
 
@@ -188,11 +177,14 @@ public class TestLobby : MonoBehaviour
 
         return currentLobby.HostId == AuthenticationService.Instance.PlayerId;
     }
+    
 
-    private void Log(string message)
+    private void OnDestroy()
     {
-        logUGUI.text += "\n" + message;
+        if (Singleton == this)
+        {
+            Singleton = null;
+        }
     }
-
 
 }
